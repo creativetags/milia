@@ -56,22 +56,21 @@ module Milia
 # EXCEPTIONS -- InvalidTenantAccess
 # ------------------------------------------------------------------------------
     def set_current_tenant( tenant_id = nil )
+      tenant_id ||= session[:tenant_id]   # use session tenant_id ?
+      
+      if tenant_id.nil?  # no arg; find automatically based on user
+        matching_tenants = Tenant.find_by_subdomain!(request.subdomains.first)
 
-      if user_signed_in?
-        
-        @_my_tenants ||= current_user.tenants  # gets all possible tenants for user
-        
-        tenant_id ||= session[:tenant_id]   # use session tenant_id ?
-        
-        if tenant_id.nil?  # no arg; find automatically based on user
-          tenant_id = @_my_tenants.first.id  # just pick the first one
-        else   # validate the specified tenant_id before setup
-          raise InvalidTenantAccess unless @_my_tenants.any?{|tu| tu.id == tenant_id}
+        if matching_tenants.blank?
+          raise InvalidTenantAccess
+        else
+          tenant_id = matching_tenants.first.id
         end
-
-      else   # user not signed in yet...
-        tenant_id = nil   # an impossible tenant_id
+        
+      else   # validate the specified tenant_id before setup
+        raise InvalidTenantAccess unless Tenant.find(tenant_id)
       end
+
 
       __milia_change_tenant!( tenant_id )        
       trace_tenanting( "set_current_tenant" )
@@ -99,19 +98,9 @@ module Milia
 # -- sets current tenant
 # ------------------------------------------------------------------------------
   def authenticate_tenant!()
-    unless authenticate_user!
-      email = ( params.nil? || params[:user].nil?  ?  "<email missing>"  : params[:user][:email] )
-      flash[:error] = "cannot sign in as #{email}; check email/password"
-      logger.info("MILIA >>>>> [failed auth user] ") unless logger.nil?
-      return false  # abort the before_filter chain
-    end
-
     trace_tenanting( "authenticate_tenant!" )
 
-    # user_signed_in? == true also means current_user returns valid user
-    raise SecurityError,"*** invalid user_signed_in  ***" unless user_signed_in?
-
-    set_current_tenant   # relies on current_user being non-nil
+    set_current_tenant
 
       # successful tenant authentication; do any callback
     if self.respond_to?( :callback_authenticate_tenant, true )
